@@ -4,7 +4,7 @@ import 'assign_driver_page.dart';
 
 class BookingListPage extends StatefulWidget {
   final String companyName;
-  final String filterStatus; // <-- added filter field
+  final String filterStatus;
 
   const BookingListPage({
     super.key,
@@ -31,7 +31,7 @@ class _BookingListPageState extends State<BookingListPage> {
         centerTitle: true,
         actions: [
           if (_selectedBookings.isNotEmpty &&
-              widget.filterStatus == "Pending") // Assign only pending
+              widget.filterStatus == "Pending")
             TextButton.icon(
               onPressed: () {
                 Navigator.push(
@@ -56,13 +56,20 @@ class _BookingListPageState extends State<BookingListPage> {
         stream: _getFilteredStream(),
         builder: (context, snapshot) {
           if (snapshot.hasError) {
-            return const Center(child: Text('Error loading bookings'));
+            debugPrint("Firestore error: ${snapshot.error}");
+            return const Center(
+              child: Text(
+                '⚠️ Error loading bookings\nPlease check your Firestore index setup.',
+                textAlign: TextAlign.center,
+              ),
+            );
           }
+
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
 
-          final bookingDocs = snapshot.data!.docs;
+          final bookingDocs = snapshot.data?.docs ?? [];
 
           if (bookingDocs.isEmpty) {
             return Center(
@@ -79,7 +86,8 @@ class _BookingListPageState extends State<BookingListPage> {
               final isSelected = _selectedBookings.contains(bookingId);
 
               return Card(
-                margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                margin:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 elevation: 3,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -119,9 +127,9 @@ class _BookingListPageState extends State<BookingListPage> {
                             fontSize: 13, color: Colors.blueGrey),
                       ),
                       Text(
-                        'Created At: ${data['createdAt'] ?? '-'}',
-                        style:
-                            const TextStyle(fontSize: 12, color: Colors.grey),
+                        'Created At: ${data['createdAt']?.toString() ?? '-'}',
+                        style: const TextStyle(
+                            fontSize: 12, color: Colors.grey),
                       ),
                     ],
                   ),
@@ -135,23 +143,30 @@ class _BookingListPageState extends State<BookingListPage> {
     );
   }
 
+  /// --- STREAM BUILDER FIRESTORE QUERY ---
   Stream<QuerySnapshot> _getFilteredStream() {
-    final baseQuery = bookings
-        .where('companyName', isEqualTo: widget.companyName)
-        .orderBy('createdAt', descending: true);
+    try {
+      Query baseQuery = bookings.where('companyName',
+          isEqualTo: widget.companyName);
 
-    if (widget.filterStatus == "Pending") {
-      return baseQuery.where('status', isEqualTo: 'Pending').snapshots();
-    } else if (widget.filterStatus == "Assigned") {
-      return baseQuery.where('status', isEqualTo: 'Assigned').snapshots();
-    } else if (widget.filterStatus == "Today") {
-      final today = DateTime.now().toString().split(' ')[0];
-      return baseQuery.where('startDate', isEqualTo: today).snapshots();
-    } else if (widget.filterStatus == "Upcoming") {
-      final today = DateTime.now().toString().split(' ')[0];
-      return baseQuery.where('startDate', isGreaterThan: today).snapshots();
-    } else {
+      // Add filters based on selected status
+      if (widget.filterStatus == "Pending") {
+        baseQuery = baseQuery.where('status', isEqualTo: 'Pending');
+      } else if (widget.filterStatus == "Assigned") {
+        baseQuery = baseQuery.where('status', isEqualTo: 'Assigned');
+      } else if (widget.filterStatus == "Today") {
+        final today = DateTime.now().toString().split(' ')[0];
+        baseQuery = baseQuery.where('startDate', isEqualTo: today);
+      } else if (widget.filterStatus == "Upcoming") {
+        final today = DateTime.now().toString().split(' ')[0];
+        baseQuery = baseQuery.where('startDate', isGreaterThan: today);
+      }
+
+      // ⚠️ Avoid Firestore composite index error by removing orderBy if not needed
       return baseQuery.snapshots();
+    } catch (e) {
+      debugPrint("Error building Firestore query: $e");
+      rethrow;
     }
   }
 }
