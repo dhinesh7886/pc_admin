@@ -12,69 +12,53 @@ class LeaveRequestsPage extends StatefulWidget {
 }
 
 class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
-  // Parse various date representations to DateTime (Timestamp, String, DateTime)
+  // Parse any Firestore or string date
   DateTime? parseToDateTime(dynamic date) {
     try {
       if (date == null) return null;
       if (date is Timestamp) return date.toDate();
       if (date is DateTime) return date;
-      if (date is String) {
-        // Try ISO-8601 parse first
-        final dt = DateTime.tryParse(date);
-        if (dt != null) return dt;
-        // If parsing fails, return null
-        return null;
-      }
+      if (date is String) return DateTime.tryParse(date);
       return null;
     } catch (_) {
       return null;
     }
   }
 
-  // Format to DD-MMM-YYYY
+  // Format date to DD-MMM-YYYY
   String formatDate(dynamic date) {
-    try {
-      final dt = parseToDateTime(date);
-      if (dt == null) return "N/A";
-      return DateFormat('dd-MMM-yyyy').format(dt);
-    } catch (e) {
-      return "Invalid";
-    }
+    final dt = parseToDateTime(date);
+    if (dt == null) return "N/A";
+    return DateFormat('dd-MMM-yyyy').format(dt);
   }
 
-  // Calculate inclusive days between start and end (if possible)
+  // Calculate leave duration (inclusive)
   String computeDaysText(dynamic start, dynamic end) {
     final s = parseToDateTime(start);
     final e = parseToDateTime(end);
     if (s == null || e == null) return "";
-    final diff = e.difference(s).inDays + 1; // inclusive
-    if (diff <= 0) return "";
-    return " • $diff ${diff == 1 ? 'day' : 'days'}";
+    final diff = e.difference(s).inDays + 1;
+    return diff > 0 ? " • $diff ${diff == 1 ? 'day' : 'days'}" : "";
   }
 
-  // 🔹 Update leave status
+  // Update leave status
   Future<void> updateLeaveStatus(
       String userId, String requestId, String status) async {
-    try {
-      await FirebaseFirestore.instance
-          .collection("Users")
-          .doc(userId)
-          .collection("leave_requests")
-          .doc(requestId)
-          .update({"status": status});
+    await FirebaseFirestore.instance
+        .collection("Users")
+        .doc(userId)
+        .collection("leave_requests")
+        .doc(requestId)
+        .update({"status": status});
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Leave request $status successfully")),
-      );
-    } catch (e) {
-      debugPrint("Error updating status: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to update status: $e")),
-      );
-    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text("Leave request $status successfully")),
+    );
+
+    setState(() {});
   }
 
-  // 🔹 Show confirmation dialog
+  // Confirmation dialog
   Future<bool?> showConfirmationDialog(String action) {
     return showDialog<bool>(
       context: context,
@@ -98,6 +82,7 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
     );
   }
 
+  // --- MAIN BUILD ---
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -109,7 +94,7 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
       body: LayoutBuilder(
         builder: (context, constraints) {
           final width = constraints.maxWidth;
-          final padding = width * 0.05;
+          final padding = width > 600 ? width * 0.15 : width * 0.05; // responsive padding
 
           return StreamBuilder<QuerySnapshot>(
             stream: FirebaseFirestore.instance
@@ -137,7 +122,7 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
                   if (!snapshot.hasData || snapshot.data!.isEmpty) {
                     return const Center(
                       child: Text(
-                        "No leave requests waiting for approval",
+                        "No current or upcoming leave requests",
                         style: TextStyle(fontSize: 18),
                       ),
                     );
@@ -153,17 +138,18 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
     );
   }
 
-  // 🔹 Build pending requests dynamically
+  // --- BUILD REQUEST CARDS ---
   Future<List<Widget>> _buildPendingRequests(
       List<QueryDocumentSnapshot> users, double padding) async {
     List<Widget> pendingRequests = [];
+    final today = DateTime.now();
 
     for (var userDoc in users) {
       final userId = userDoc.id;
       final userData = userDoc.data() as Map<String, dynamic>;
       final userName = userData['name'] ?? userId;
+      final employeeId = userData['id'] ?? "N/A";
 
-      // Fetch only requests waiting for approval
       final leaveSnapshot = await FirebaseFirestore.instance
           .collection("Users")
           .doc(userId)
@@ -177,115 +163,131 @@ class _LeaveRequestsPageState extends State<LeaveRequestsPage> {
         final leaveData = leaveDoc.data();
         final requestId = leaveDoc.id;
 
-        // parse dates and compute days
-        final startDateRaw = leaveData['startDate'];
-        final endDateRaw = leaveData['endDate'];
-        final startDateStr = formatDate(startDateRaw);
-        final endDateStr = formatDate(endDateRaw);
-        final daysSuffix = computeDaysText(startDateRaw, endDateRaw); // " • X days"
-
+        final startDate = parseToDateTime(leaveData['startDate']);
+        final endDate = parseToDateTime(leaveData['endDate']);
         final reason = leaveData['reason'] ?? "No reason provided";
 
-        pendingRequests.add(
-          Card(
-            margin: EdgeInsets.symmetric(horizontal: padding, vertical: 8),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12),
-            ),
-            elevation: 3,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    userName,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      fontSize: 16,
+        // Auto Reject past leave requests not acted on
+        if (endDate != null && endDate.isBefore(today)) {
+          await FirebaseFirestore.instance
+              .collection("Users")
+              .doc(userId)
+              .collection("leave_requests")
+              .doc(requestId)
+              .update({"status": "Rejected"});
+          continue; // skip past rejected ones
+        }
+
+        // Show only current and upcoming
+        if (endDate != null && endDate.isAfter(today.subtract(const Duration(days: 1)))) {
+          final startDateStr = formatDate(startDate);
+          final endDateStr = formatDate(endDate);
+          final daysSuffix = computeDaysText(startDate, endDate);
+
+          pendingRequests.add(
+            Card(
+              margin: EdgeInsets.symmetric(horizontal: padding, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: 3,
+              child: Padding(
+                padding: const EdgeInsets.all(14),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Employee Name + ID
+                    Text(
+                      "$userName ($employeeId)",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 6),
+                    const SizedBox(height: 6),
 
-                  // Reason with days count shown inline
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          "Reason: $reason",
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                      ),
-                      if (daysSuffix.isNotEmpty)
-                        Container(
-                          margin: const EdgeInsets.only(left: 8),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: Colors.indigo.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
+                    // Reason + Days
+                    Row(
+                      children: [
+                        Expanded(
                           child: Text(
-                            daysSuffix.replaceFirst(" • ", ""), // show just "X days"
-                            style: const TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 13,
-                              color: Colors.indigo,
-                            ),
+                            "Reason: $reason",
+                            style: const TextStyle(fontSize: 14),
                           ),
-                        )
-                    ],
-                  ),
+                        ),
+                        if (daysSuffix.isNotEmpty)
+                          Container(
+                            margin: const EdgeInsets.only(left: 8),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.indigo.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text(
+                              daysSuffix.replaceFirst(" • ", ""),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 13,
+                                color: Colors.indigo,
+                              ),
+                            ),
+                          )
+                      ],
+                    ),
+                    const SizedBox(height: 6),
 
-                  const SizedBox(height: 6),
+                    // Dates
+                    Row(
+                      children: [
+                        Text("From: ${formatDate(startDate)}",
+                            style: const TextStyle(fontSize: 13)),
+                        const SizedBox(width: 12),
+                        Text("To: ${formatDate(endDate)}",
+                            style: const TextStyle(fontSize: 13)),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
 
-                  // From / To lines with formatted dates
-                  Row(
-                    children: [
-                      Text("From: $startDateStr",
-                          style: const TextStyle(fontSize: 13)),
-                      const SizedBox(width: 12),
-                      Text("To: $endDateStr", style: const TextStyle(fontSize: 13)),
-                    ],
-                  ),
-
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green),
-                        onPressed: () async {
-                          final confirm =
-                              await showConfirmationDialog("Approve");
-                          if (confirm ?? false) {
-                            await updateLeaveStatus(
-                                userId, requestId, "Approved");
-                          }
-                        },
-                        child: const Text("Approve"),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        style:
-                            ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                        onPressed: () async {
-                          final confirm = await showConfirmationDialog("Reject");
-                          if (confirm ?? false) {
-                            await updateLeaveStatus(
-                                userId, requestId, "Rejected");
-                          }
-                        },
-                        child: const Text("Reject"),
-                      ),
-                    ],
-                  ),
-                ],
+                    // Buttons
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green),
+                          onPressed: () async {
+                            final confirm =
+                                await showConfirmationDialog("Approve");
+                            if (confirm ?? false) {
+                              await updateLeaveStatus(
+                                  userId, requestId, "Approved");
+                            }
+                          },
+                          child: const Text("Approve"),
+                        ),
+                        const SizedBox(width: 8),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red),
+                          onPressed: () async {
+                            final confirm =
+                                await showConfirmationDialog("Reject");
+                            if (confirm ?? false) {
+                              await updateLeaveStatus(
+                                  userId, requestId, "Rejected");
+                            }
+                          },
+                          child: const Text("Reject"),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        );
+          );
+        }
       }
     }
 

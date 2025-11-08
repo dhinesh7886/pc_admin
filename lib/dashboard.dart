@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:pcadmin/leave_requests.dart';
-import 'view_attendance.dart'; // AdminAttendancePage import
+import 'admin_attendance.dart'; // AdminAttendancePage import
+import 'package:pcadmin/permission_requests.dart';
 
 class DashboardPage extends StatelessWidget {
   final String companyName;
@@ -63,7 +64,15 @@ class DashboardPage extends StatelessWidget {
         title: "Permission Request",
         icon: Icons.assignment_turned_in,
         color: Colors.orange,
-        onTap: () {},
+        onTap: () {
+                    Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (context) =>
+                  PermissionRequestsPage(companyName: companyName),
+            ),
+          );
+
+        },
       ),
     ];
 

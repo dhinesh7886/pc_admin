@@ -17,8 +17,7 @@ class InactiveUsers extends StatefulWidget {
 
 class _InactiveUsersState extends State<InactiveUsers> {
   List<String> selectedUserList = [];
-  bool isSelect = false;
-  bool isSelectAll = false;
+  bool isSelectMode = false;
 
   // Filters
   String? selectedDesignation;
@@ -26,10 +25,12 @@ class _InactiveUsersState extends State<InactiveUsers> {
   List<String> designations = [];
   List<String> departments = [];
 
+  // Keep latest visible users (after applying filters) so AppBar buttons can act on them
+  List<QueryDocumentSnapshot> currentVisibleUsers = [];
+
   Future<void> deleteUserFromFirebase(String uid) async {
     try {
       await FirebaseFirestore.instance.collection('Users').doc(uid).delete();
-      setState(() {});
     } catch (e) {
       print("Error while deleting an item: $e");
     }
@@ -40,7 +41,6 @@ class _InactiveUsersState extends State<InactiveUsers> {
       await FirebaseFirestore.instance.collection('Users').doc(uid).update({
         "isActive": true,
       });
-      setState(() {});
     } catch (e) {
       print("Error while activating an item: $e");
     }
@@ -94,7 +94,8 @@ class _InactiveUsersState extends State<InactiveUsers> {
 
       for (var u in users) {
         final data = u.data() as Map<String, dynamic>;
-        if (selectedUserList.contains(data['uuid'])) {
+        final uid = data['uuid'] ?? u.id;
+        if (selectedUserList.contains(uid)) {
           sheet.appendRow([
             data['name'] ?? '',
             data['id'] ?? '',
@@ -118,7 +119,9 @@ class _InactiveUsersState extends State<InactiveUsers> {
         ..writeAsBytesSync(excel.encode()!);
 
       await Share.shareXFiles(
-          [XFile(filePath)], text: 'Selected Inactive Users List');
+        [XFile(filePath)],
+        text: 'Selected Inactive Users List',
+      );
     } catch (e) {
       print("Error exporting Excel: $e");
       if (mounted) {
@@ -127,6 +130,28 @@ class _InactiveUsersState extends State<InactiveUsers> {
         );
       }
     }
+  }
+
+  void _toggleSelectAllVisible() {
+    final ids = currentVisibleUsers
+        .map((u) {
+          final data = u.data() as Map<String, dynamic>;
+          return (data['uuid'] ?? u.id).toString();
+        })
+        .toSet()
+        .toList();
+
+    final allSelected = ids.every((id) => selectedUserList.contains(id));
+
+    setState(() {
+      if (allSelected) {
+        selectedUserList.removeWhere((id) => ids.contains(id));
+      } else {
+        final current = selectedUserList.toSet();
+        current.addAll(ids);
+        selectedUserList = current.toList();
+      }
+    });
   }
 
   @override
@@ -147,7 +172,7 @@ class _InactiveUsersState extends State<InactiveUsers> {
           ),
         ),
         actions: [
-          if (isSelect)
+          if (isSelectMode)
             IconButton(
               tooltip: "Export & Share Selected",
               icon: const Icon(Icons.download),
@@ -155,42 +180,44 @@ class _InactiveUsersState extends State<InactiveUsers> {
                 var snapshot = await FirebaseFirestore.instance
                     .collection('Users')
                     .where('isActive', isEqualTo: false)
-                    .where('companyName', isEqualTo: widget.companyName) // ✅ company filter
+                    .where('companyName', isEqualTo: widget.companyName)
                     .get();
 
                 var users = snapshot.docs;
 
                 if (selectedDesignation != null) {
                   users = users
-                      .where((u) => u['designation'] == selectedDesignation)
+                      .where((u) =>
+                          (u['designation'] ?? '') == selectedDesignation)
                       .toList();
                 }
                 if (selectedDepartment != null) {
                   users = users
-                      .where((u) => u['department'] == selectedDepartment)
+                      .where(
+                          (u) => (u['department'] ?? '') == selectedDepartment)
                       .toList();
                 }
 
                 await exportSelectedToExcel(users);
               },
             ),
-          if (!isSelect)
+          if (!isSelectMode)
             TextButton(
-              onPressed: () => setState(() => isSelect = true),
+              onPressed: () => setState(() => isSelectMode = true),
               child: const Text("Select", style: TextStyle(color: Colors.white)),
             ),
-          if (isSelect)
-            TextButton(
-              onPressed: () => setState(() => isSelectAll = true),
-              child: const Text("All", style: TextStyle(color: Colors.white)),
-            ),
-          if (isSelect)
+          if (isSelectMode)
             TextButton(
               onPressed: () => setState(() {
-                isSelect = false;
+                isSelectMode = false;
                 selectedUserList.clear();
               }),
               child: const Text("Cancel", style: TextStyle(color: Colors.white)),
+            ),
+          if (isSelectMode)
+            TextButton(
+              onPressed: _toggleSelectAllVisible,
+              child: const Text("All", style: TextStyle(color: Colors.white)),
             ),
         ],
       ),
@@ -198,49 +225,43 @@ class _InactiveUsersState extends State<InactiveUsers> {
         stream: FirebaseFirestore.instance
             .collection('Users')
             .where('isActive', isEqualTo: false)
-            .where('companyName', isEqualTo: widget.companyName) // ✅ only current company
+            .where('companyName', isEqualTo: widget.companyName)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
           if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            currentVisibleUsers = [];
             return const Center(child: Text("No inactive users found."));
           }
 
           var users = snapshot.data!.docs;
 
-          // Populate filters dynamically
           designations = users
-              .map((u) => u['designation']?.toString() ?? "")
+              .map((u) => (u['designation'] ?? '').toString())
+              .where((s) => s.isNotEmpty)
               .toSet()
               .toList();
-          designations.removeWhere((d) => d.isEmpty);
 
           departments = users
-              .map((u) => u['department']?.toString() ?? "")
+              .map((u) => (u['department'] ?? '').toString())
+              .where((s) => s.isNotEmpty)
               .toSet()
               .toList();
-          departments.removeWhere((d) => d.isEmpty);
 
-          // Apply filters
           if (selectedDesignation != null) {
             users = users
-                .where((u) => u['designation'] == selectedDesignation)
+                .where((u) => (u['designation'] ?? '') == selectedDesignation)
                 .toList();
           }
           if (selectedDepartment != null) {
             users = users
-                .where((u) => u['department'] == selectedDepartment)
+                .where((u) => (u['department'] ?? '') == selectedDepartment)
                 .toList();
           }
 
-          // Select All logic
-          if (isSelectAll) {
-            selectedUserList =
-                users.map((u) => u['uuid'].toString()).toList();
-            isSelectAll = false;
-          }
+          currentVisibleUsers = users;
 
           return Column(
             children: [
@@ -253,9 +274,11 @@ class _InactiveUsersState extends State<InactiveUsers> {
                         value: selectedDesignation,
                         hint: const Text("Filter by Designation"),
                         items: designations
-                            .map((d) => DropdownMenuItem(value: d, child: Text(d)))
+                            .map((d) =>
+                                DropdownMenuItem(value: d, child: Text(d)))
                             .toList(),
-                        onChanged: (value) => setState(() => selectedDesignation = value),
+                        onChanged: (value) =>
+                            setState(() => selectedDesignation = value),
                         isExpanded: true,
                       ),
                     ),
@@ -265,9 +288,11 @@ class _InactiveUsersState extends State<InactiveUsers> {
                         value: selectedDepartment,
                         hint: const Text("Filter by Department"),
                         items: departments
-                            .map((d) => DropdownMenuItem(value: d, child: Text(d)))
+                            .map((d) =>
+                                DropdownMenuItem(value: d, child: Text(d)))
                             .toList(),
-                        onChanged: (value) => setState(() => selectedDepartment = value),
+                        onChanged: (value) =>
+                            setState(() => selectedDepartment = value),
                         isExpanded: true,
                       ),
                     ),
@@ -317,13 +342,14 @@ class _InactiveUsersState extends State<InactiveUsers> {
                   heroTag: "deleteBtn",
                   backgroundColor: Colors.red,
                   onPressed: () async {
-                    bool confirmed =
-                        await showConfirmationDialog("Confirm Delete", "Delete selected users?");
+                    bool confirmed = await showConfirmationDialog(
+                        "Confirm Delete", "Delete selected users?");
                     if (confirmed) {
                       for (var uid in selectedUserList) {
                         await deleteUserFromFirebase(uid);
                       }
                       selectedUserList.clear();
+                      setState(() {});
                     }
                   },
                   child: const Icon(Icons.delete),
@@ -340,6 +366,7 @@ class _InactiveUsersState extends State<InactiveUsers> {
                         await activateUserFromFirebase(uid);
                       }
                       selectedUserList.clear();
+                      setState(() {});
                     }
                   },
                   child: const Icon(Icons.done),
@@ -350,26 +377,26 @@ class _InactiveUsersState extends State<InactiveUsers> {
   }
 
   Widget _buildUserCard(QueryDocumentSnapshot user) {
-    final userData = user.data() as Map<String, dynamic>;
+    final data = user.data() as Map<String, dynamic>;
+    final uid = (data['uuid'] ?? user.id).toString();
+    final isSelected = selectedUserList.contains(uid);
 
     return GestureDetector(
       onTap: () {
-        if (!isSelect) {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => UserDetailPage(
-                userDetail: userData,
-                isActive: false,
-                companyName: widget.companyName,
-              ),
+        if (!isSelectMode) {
+          Navigator.of(context).push(MaterialPageRoute(
+            builder: (_) => UserDetailPage(
+              userDetail: data,
+              isActive: false,
+              companyName: widget.companyName,
             ),
-          );
+          ));
         } else {
           setState(() {
-            if (selectedUserList.contains(userData['uuid'])) {
-              selectedUserList.remove(userData['uuid']);
+            if (isSelected) {
+              selectedUserList.remove(uid);
             } else {
-              selectedUserList.add(userData['uuid']);
+              selectedUserList.add(uid);
             }
           });
         }
@@ -377,42 +404,57 @@ class _InactiveUsersState extends State<InactiveUsers> {
       child: Card(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         elevation: 4,
-        color: Colors.blue.shade50,
+        color: isSelected ? Colors.lightBlue.shade100 : Colors.blue.shade50,
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
             children: [
-              if (isSelect)
+              if (isSelectMode)
                 Checkbox(
-                  value: selectedUserList.contains(userData['uuid']),
+                  value: isSelected,
                   onChanged: (value) {
                     setState(() {
                       if (value == true) {
-                        selectedUserList.add(userData['uuid']);
+                        if (!selectedUserList.contains(uid)) {
+                          selectedUserList.add(uid);
+                        }
                       } else {
-                        selectedUserList.remove(userData['uuid']);
+                        selectedUserList.remove(uid);
                       }
                     });
                   },
                 ),
               CircleAvatar(
                 radius: 25,
-                backgroundImage: NetworkImage(userData['imageUrl'] ?? ''),
+                backgroundColor: Colors.grey.shade300,
+                backgroundImage: (data['imageUrl'] != null &&
+                        data['imageUrl'] is String &&
+                        (data['imageUrl'] as String).isNotEmpty)
+                    ? NetworkImage(data['imageUrl'] as String)
+                    : null,
+                onBackgroundImageError: (_, __) {},
+                child: (data['imageUrl'] == null ||
+                        (data['imageUrl'] is String &&
+                            (data['imageUrl'] as String).isEmpty))
+                    ? const Icon(Icons.person, color: Colors.grey)
+                    : null,
               ),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(userData['name'] ?? '',
-                        style: const TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(
+                      data['name'] ?? '',
+                      style: const TextStyle(
+                          fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
                     const SizedBox(height: 4),
-                    Text("ID: ${userData['id'] ?? ''}"),
-                    if (userData['designation'] != null)
-                      Text("Designation: ${userData['designation']}"),
-                    if (userData['department'] != null)
-                      Text("Dept: ${userData['department']}"),
+                    Text("ID: ${data['id'] ?? ''}"),
+                    if ((data['designation'] ?? null) != null)
+                      Text("Designation: ${data['designation']}"),
+                    if ((data['department'] ?? null) != null)
+                      Text("Dept: ${data['department']}"),
                   ],
                 ),
               ),

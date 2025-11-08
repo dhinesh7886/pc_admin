@@ -1,4 +1,6 @@
+// lib/admin_home.dart
 import 'package:flutter/material.dart';
+import 'package:pcadmin/bookings_menu_page.dart'; // aliased import to avoid name conflicts
 import 'package:pcadmin/dashboard.dart';
 import 'package:pcadmin/users.dart';
 import 'package:pcadmin/login_page.dart';
@@ -26,9 +28,9 @@ class _AdminHomePageState extends State<AdminHomePage> {
       await prefs.clear();
     } catch (e) {
       if (mounted) Navigator.of(context).pop();
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Logout failed: $e'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Logout failed: $e')),
+      );
       return;
     }
 
@@ -130,15 +132,32 @@ class _AdminHomePageState extends State<AdminHomePage> {
               ),
               _buildMenuCard(
                 label: "Approved/Rejected Leaves",
-                icon: Icons.assignment_turned_in_outlined, // better icon
+                icon: Icons.assignment_turned_in_outlined,
                 color1: const Color.fromARGB(255, 66, 220, 247),
                 color2: const Color.fromARGB(255, 242, 97, 255),
                 onTap: () => Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) => LeavePermissionPage(companyName: widget.companyName),
+                    builder: (context) => LeavePermissionPage(
+                      companyName: widget.companyName,
+                    ),
                   ),
                 ),
+              ),
+              _buildMenuCard(
+                label: "Bookings",
+                icon: Icons.assignment_outlined,
+                color1: const Color.fromARGB(255, 233, 171, 101),
+                color2: const Color.fromARGB(255, 78, 143, 185),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (context) => BookingsMenuPage(
+                        companyName: widget.companyName,
+                      ),
+                    ),
+                  );
+                },
               ),
             ],
           );
@@ -154,47 +173,41 @@ class _AdminHomePageState extends State<AdminHomePage> {
     required Color color2,
     required VoidCallback onTap,
   }) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return InkWell(
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [color1, color2]),
           borderRadius: BorderRadius.circular(16),
-          onTap: onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(colors: [color1, color2]),
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: color2.withOpacity(0.4),
-                  blurRadius: 10,
-                  offset: const Offset(0, 6),
+          boxShadow: [
+            BoxShadow(
+              color: color2.withOpacity(0.4),
+              blurRadius: 10,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, size: 48, color: Colors.white),
+              const SizedBox(height: 12),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  letterSpacing: 1.1,
                 ),
-              ],
-            ),
-            child: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(icon, size: constraints.maxHeight * 0.3, color: Colors.white),
-                  const SizedBox(height: 12),
-                  Flexible(
-                    child: Text(
-                      label,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        letterSpacing: 1.1,
-                      ),
-                    ),
-                  ),
-                ],
               ),
-            ),
+            ],
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

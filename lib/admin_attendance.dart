@@ -40,7 +40,6 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
     _refreshEmployeeData();
   }
 
-  // 🔹 Fetch all departments and designations for dropdowns
   Future<void> _fetchFilters() async {
     final usersSnapshot = await _firestore
         .collection('Users')
@@ -62,7 +61,6 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
     });
   }
 
-  // 🔹 Refresh employee attendance data
   Future<void> _refreshEmployeeData() async {
     final employeeMap = await _getAttendanceGroupedByEmployee();
     setState(() {
@@ -70,7 +68,6 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
     });
   }
 
-  // 🔹 Fetch attendance records grouped by employee
   Future<Map<String, List<Map<String, dynamic>>>> _getAttendanceGroupedByEmployee() async {
     Map<String, List<Map<String, dynamic>>> employeeMap = {};
     _employeeInfo.clear();
@@ -143,7 +140,6 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
     return employeeMap;
   }
 
-  // 🔹 Pick date range
   Future<void> _pickDateRange() async {
     final now = DateTime.now();
     final picked = await showDateRangePicker(
@@ -164,7 +160,6 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
     }
   }
 
-  // 🔹 Toggle select all employees
   void _toggleSelectAll(bool selectAll) {
     setState(() {
       if (!selectAll) {
@@ -179,7 +174,6 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
     });
   }
 
-  // 🔹 Download Excel and share
   Future<void> _downloadAndShare() async {
     if (_startDate == null || _endDate == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -316,7 +310,6 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
                               textAlign: TextAlign.center,
                             ),
                           ),
-                        // Search Field
                         TextField(
                           decoration: InputDecoration(
                             hintText: 'Search by Name or ID...',
@@ -341,7 +334,6 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
                           onChanged: (val) => setState(() => _searchQuery = val.trim().toLowerCase()),
                         ),
                         const SizedBox(height: 8),
-                        // Filters Row
                         Row(
                           children: [
                             Expanded(
@@ -392,7 +384,6 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
                       ],
                     ),
                   ),
-                // Employee List
                 Expanded(
                   child: _employeeMap.isEmpty
                       ? const Center(child: CircularProgressIndicator())
@@ -406,6 +397,7 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
                             final split = key.split('|');
                             final name = split[0];
                             final id = split[1];
+                            final records = _employeeMap[key]!;
                             return Card(
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                               elevation: 4,
@@ -438,7 +430,8 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
                                             MaterialPageRoute(
                                               builder: (_) => EmployeeAttendanceDetailPage(
                                                 employeeName: name,
-                                                records: _employeeMap[key]!,
+                                                employeeId: id, // ✅ FIXED line 431
+                                                records: records,
                                               ),
                                             ),
                                           );
@@ -451,7 +444,6 @@ class _AdminAttendancePageState extends State<AdminAttendancePage> {
                 ),
               ],
             ),
-            // Floating Buttons
             if (_selectionMode)
               Positioned(
                 bottom: 90,
